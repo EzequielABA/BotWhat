@@ -1,3 +1,4 @@
+
 import axios from "axios";
 
 let mergedCommands = [
@@ -157,7 +158,8 @@ export default {
             mp3: playMp3,
           } = playData.result;
 
-          await Atlas.sendMessage(
+          // Enviar y guardar la referencia del mensaje de información
+          const previewMessage = await Atlas.sendMessage(
             m.from,
             {
               image: { url: playThumbnail },
@@ -169,6 +171,7 @@ export default {
             { quoted: m },
           );
 
+          // Enviar el audio
           await Atlas.sendMessage(
             m.from,
             {
@@ -186,6 +189,14 @@ export default {
             },
             { quoted: m },
           );
+
+          // Eliminar el mensaje de información después de enviar el audio
+          if (previewMessage?.key) {
+            await Atlas.sendMessage(m.from, {
+              delete: previewMessage.key,
+            });
+          }
+
           break;
       }
     } catch (err) {

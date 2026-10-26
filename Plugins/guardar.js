@@ -1,0 +1,106 @@
+
+export default {
+  name: "guardar",
+  alias: ["archivar"],
+  description: "Guardar archivos de chats privados y grupos en el chat personal del bot",
+
+  start: async (Atlas, m, { quoted, isCreator, botNumber }) => {
+    const fs = await import("node:fs/promises");
+    const configPath = new URL("../guardar-config.json", import.meta.url);
+    const originalText = String(m.text || "").trim();
+    const cleanedText = originalText.replace(/^\/guardar\s+/i, "").trim();
+    const parts = cleanedText.split(/\s+/);
+
+    if (
+      /^configurar$/i.test(parts[0] || "") &&
+      /^guardar$/i.test(parts[1] || "")
+    ) {
+      if (m.isGroup || !isCreator) {
+        return m.reply(
+          "Solo el propietario puede configurar esta función desde un chat privado."
+        );
+      }
+
+      const trigger = String(parts[2] || "").toLowerCase();
+
+      if (!/^[a-z0-9_-]+$/i.test(trigger)) {
+        return m.reply("Uso: configurar guardar palabra");
+      }
+
+      await fs.writeFile(
+        configPath,
+        JSON.stringify({ trigger }, null, 2),
+        "utf8"
+      );
+
+      return m.reply("Palabra activadora guardada: " + trigger);
+    }
+
+    let config = {};
+    try {
+      config = JSON.parse(await fs.readFile(configPath, "utf8"));
+    } catch {}
+
+    const trigger = String(config.trigger || "guardar").toLowerCase();
+
+    if (originalText.toLowerCase() !== trigger) return;
+
+    if (!isCreator) {
+      return m.reply("Solo el propietario puede utilizar esta función.");
+    }
+
+    if (!quoted || !quoted.msg) {
+      return m.reply(
+        "Responde directamente a una foto, PDF, documento o vídeo con la palabra activadora."
+      );
+    }
+
+    const media = quoted.msg;
+    const mime = String(media.mimetype || "").toLowerCase();
+
+    if (
+      !mime.startsWith("image/") &&
+      !mime.startsWith("video/") &&
+      !mime.startsWith("application/")
+    ) {
+      return m.reply("El archivo citado no es compatible.");
+    }
+
+    try {
+ const buffer = await Atlas.downloadMediaMessage(
+  quoted.fakeObj || quoted
+);
+
+      if (!buffer || !buffer.length) {
+        return m.reply("No pude descargar el archivo citado.");
+      }
+
+      const destination =
+        botNumber || await Atlas.decodeJid(Atlas.user.id);
+      const fileName = String(media.fileName || media.title || "archivo");
+
+      if (mime.startsWith("image/")) {
+        await Atlas.sendMessage(destination, {
+          image: buffer,
+          caption: fileName
+        });
+      } else if (mime.startsWith("video/")) {
+        await Atlas.sendMessage(destination, {
+          video: buffer,
+          caption: fileName
+        });
+      } else {
+        await Atlas.sendMessage(destination, {
+          document: buffer,
+          mimetype: mime,
+          fileName
+        });
+      }
+
+return;
+} catch (error) {
+  console.error("[GUARDAR] Error:", error);
+  return;
+}
+  }
+};

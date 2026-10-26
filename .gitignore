@@ -15,3 +15,12 @@ ExtraPlugins_
 atlas.log
 atlas.pid
 CONTEXT.md
+
+node_modules/
+.env
+.env.*
+!.env.example
+
+Core.js.respaldo-*
+respaldo_guardar/
+guardar-config.json
