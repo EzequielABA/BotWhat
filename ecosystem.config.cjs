@@ -10,7 +10,7 @@ module.exports = {
         DOTENVX_QUIET: "true",
       },
       // interpreter: "bun",
-      node_args: "--max-old-space-size=8000 --expose-gc", // ignored when using Bun
+      node_args: "--max-old-space-size=256 --expose-gc", // ignored when using Bun
       autorestart: true,
       min_uptime: 10000,
       max_restarts: 100,

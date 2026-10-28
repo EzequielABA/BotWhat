@@ -6,7 +6,7 @@
   "main": "index.js",
   "scripts": {
     "test": "node --check index.js && node --check Configurations.js && node --check Core.js",
-    "start": "node --max-old-space-size=8000 --expose-gc index.js"
+    "start": "node --max-old-space-size=256 --expose-gc index.js"
   },
   "repository": {
     "type": "git",
