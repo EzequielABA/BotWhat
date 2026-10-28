@@ -192,6 +192,14 @@ const db = new QuickDB({ driver: jsonDriver });
     }
 
     const isCmd = body.startsWith(prefix);
+    console.log("[DEBUG COMANDO]", {
+  type,
+  body,
+  prefix,
+  isCmd,
+  sender: m.sender,
+  from: m.from,
+});
     const mime = (quoted.msg || m.msg).mimetype || " ";
     const isMedia = /image|video|sticker|audio/.test(mime);
     const budy = typeof m.text == "string" ? m.text : "";
