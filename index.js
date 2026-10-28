@@ -22,6 +22,9 @@ import { serialize, WAConnection } from "./System/whatsapp.js";
 import { smsg, getBuffer, getSizeMedia } from "./System/Function2.js";
 import { fileURLToPath } from "url";
 import { dirname } from "path";
+
+import readline from "readline";
+
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
 
@@ -1088,6 +1091,61 @@ const connectAtlas = async (trigger) => {
 };
 
 void startAtlas();
+
+
+async function generatePairingCode() {
+  const phone = String(global.owner?.[0] || "").replace(/[^0-9]/g, "");
+
+  if (!phone) {
+    console.log("[ ATLAS ] No hay un número configurado en global.owner[0].");
+    return;
+  }
+
+  if (status === "open") {
+    console.log("[ ATLAS ] WhatsApp ya está conectado; no hace falta otro código.");
+    return;
+  }
+
+  const socket = AtlasSocket;
+
+  if (!socket || !socket.ws?.isOpen) {
+    console.log("[ ATLAS ] El socket todavía no está listo para generar el código.");
+    return;
+  }
+
+  try {
+    console.log("[ ATLAS ] Generando código de vinculación...");
+    const code = await socket.requestPairingCode(phone);
+    console.log(
+      chalk.black.bgGreen(" CÓDIGO DE VINCULACIÓN "),
+      chalk.black.bgWhite(` ${code} `),
+    );
+    console.log("[ ATLAS ] Vincula el dispositivo desde WhatsApp > Dispositivos vinculados.");
+  } catch (error) {
+    console.error("[ ATLAS ] No se pudo generar el código:", error.message);
+  }
+}
+
+const pairingConsole = readline.createInterface({
+  input: process.stdin,
+  output: process.stdout,
+});
+
+console.log("[ ATLAS ] Esperando a que el socket esté listo para generar el código automáticamente.");
+
+const pairingCheck = setInterval(() => {
+  if (status === "open") {
+    clearInterval(pairingCheck);
+    console.log("[ ATLAS ] Sesión ya conectada; no se necesita código.");
+    return;
+  }
+
+  if (AtlasSocket?.ws?.isOpen && status === "connecting") {
+    clearInterval(pairingCheck);
+    void generatePairingCode();
+  }
+}, 1000);
+
 
 // Dynamic garbage collection — interval configurable via GC_INTERVAL_MINUTES env (default: 30)
 const GC_INTERVAL_MINUTES = Math.max(
