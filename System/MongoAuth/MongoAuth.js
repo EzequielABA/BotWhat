@@ -8,7 +8,11 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
 // All local sessions live under System/session/<sessionId>/
-const SESSION_BASE_DIR = path.join(__dirname, "..", "session");
+
+const SESSION_BASE_DIR = process.env.SESSION_DIR
+  ? path.resolve(process.env.SESSION_DIR)
+  : path.join(__dirname, "..", "session");
+
 
 const LEGACY_KEY_TYPE_MAP = {
   preKeys: "pre-key",
