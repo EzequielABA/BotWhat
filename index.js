@@ -28,7 +28,16 @@ import readline from "readline";
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
 
-fs.writeFileSync(path.join(__dirname, "atlas.pid"), process.pid.toString());
+
+try {
+  fs.writeFileSync(path.join(__dirname, "atlas.pid"), process.pid.toString());
+} catch (err) {
+  if (err.code !== "EROFS" && err.code !== "EACCES") {
+    throw err;
+  }
+  console.log("[ ATLAS ] No se pudo crear atlas.pid en este entorno; continuando sin ese archivo.");
+}
+
 
 // Map of noise prefixes → clean replacement line printed to stdout once per event
 const _BAILEYS_NOISE_MAP = {
