@@ -23,8 +23,11 @@ global.Levels = Levels;
 
 export default async (Atlas, m, commands, chatUpdate) => {
   try {
-    const jsonDriver = new JSONDriver();
-    const db = new QuickDB({ driver: jsonDriver });
+const quickDbPath =
+  process.env.QUICKDB_PATH || "/tmp/atlas-quickdb.json";
+
+const jsonDriver = new JSONDriver(quickDbPath);
+const db = new QuickDB({ driver: jsonDriver });
 
     let { type, isGroup, sender, from } = m;
 
