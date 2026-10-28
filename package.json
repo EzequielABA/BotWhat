@@ -32,7 +32,7 @@
     "@fantox01/search-it": "^1.0.0",
     "@google/genai": "^0.7.0",
     "@hapi/boom": "^10.0.1",
-    "@napi-rs/canvas": "^0.1.97",
+    "@napi-rs/canvas": "^0.1.100",
     "@whiskeysockets/baileys": "7.0.0-rc13",
     "axios": "^1.14.0",
     "canvacord": "^6.0.4",

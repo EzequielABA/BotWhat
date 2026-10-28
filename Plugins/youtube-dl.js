@@ -1,7 +1,7 @@
 
 import axios from "axios";
 
-let mergedCommands = [
+const mergedCommands = [
   "play",
   "song",
   "yt",
@@ -10,16 +10,30 @@ let mergedCommands = [
   "ytmp4",
   "video",
   "mp4",
-  "video",
 ];
+
+const API_TIMEOUT = 15000;
+
+// Evita acumular varias solicitudes simultáneas por chat.
+const activeChats = new Set();
 
 const YT_REGEX =
   /^(https?:\/\/)?((www|m|music)\.)?(youtube(-nocookie)?\.com\/(watch\?v=|shorts\/|live\/)|youtu\.be\/)[\w-]+(\S+)?$/i;
 
 const extractUrl = (text) => {
   if (!text) return null;
-  const match = text.match(YT_REGEX);
+  const match = text.trim().match(YT_REGEX);
   return match ? match[0] : null;
+};
+
+const apiGet = async (url) => {
+  const { data } = await axios.get(url, {
+    timeout: API_TIMEOUT,
+    maxContentLength: 2 * 1024 * 1024,
+    maxBodyLength: 2 * 1024 * 1024,
+  });
+
+  return data;
 };
 
 export default {
@@ -30,6 +44,7 @@ export default {
 
   start: async (Atlas, m, { inputCMD, text, doReact, prefix }) => {
     const botName = global.botName || "ATLAS";
+    const chatId = m.from;
     let query = text?.trim();
 
     if (!query && m.quoted?.text) {
@@ -37,99 +52,122 @@ export default {
     }
 
     if (!query) {
-      return m.reply(`🎬 *YouTube Downloader*
-
-📌 *Usage:*
-• ${prefix}play <song name>
-• ${prefix}mp3 <youtube link>
-• ${prefix}video <video name>
-• ${prefix}mp4 <youtube link>
-• ${prefix}yts <query>
-
-✨ Reply to link also works`);
+      return m.reply(
+        `🎬 *YouTube Downloader*\n\n` +
+          `📌 *Usage:*\n` +
+          `• ${prefix}play <song name>\n` +
+          `• ${prefix}mp3 <youtube link>\n` +
+          `• ${prefix}video <video name>\n` +
+          `• ${prefix}mp4 <youtube link>\n` +
+          `• ${prefix}yts <query>\n\n` +
+          `✨ Reply to a link also works`,
+      );
     }
+
+    if (activeChats.has(chatId)) {
+      return m.reply(
+        "⏳ Ya tienes una solicitud de YouTube en proceso. Espera a que termine.",
+      );
+    }
+
+    activeChats.add(chatId);
 
     try {
       switch (inputCMD) {
         case "mp4":
         case "ytmp4":
-        case "video":
-          await doReact("🎥");
+        case "video": {
+          if (doReact) await doReact("🎥");
 
           let videoUrl = extractUrl(query);
+
           if (!videoUrl) {
-            const search = await axios.get(
+            const search = await apiGet(
               `https://api-faa.my.id/faa/youtube?q=${encodeURIComponent(query)}`,
             );
-            if (!search.data.status || !search.data.result.length) {
+
+            if (
+              !search?.status ||
+              !Array.isArray(search.result) ||
+              !search.result.length ||
+              !search.result[0]?.link
+            ) {
               return m.reply("❌ No video found");
             }
 
-            videoUrl = search.data.result[0].link;
+            const result = search.result[0];
+            videoUrl = result.link;
 
-            await Atlas.sendMessage(
-              m.from,
-              {
-                image: { url: search.data.result[0].imageUrl },
-                caption: `🎬 *${search.data.result[0].title}*\n⏱ ${search.data.result[0].duration}\n\n⬇️ Downloading...`,
-              },
-              { quoted: m },
-            );
+            if (result.imageUrl) {
+              await Atlas.sendMessage(
+                chatId,
+                {
+                  image: { url: result.imageUrl },
+                  caption: `🎬 *${result.title || "YouTube"}*\n⏱ ${result.duration || "N/A"}\n\n⬇️ Downloading...`,
+                },
+                { quoted: m },
+              );
+            }
           }
 
-          const videoRes = await axios.get(
+          const videoData = await apiGet(
             `https://api-faa.my.id/faa/ytmp4?url=${encodeURIComponent(videoUrl)}`,
           );
-          const videoData = videoRes.data;
 
-          if (!videoData.status) throw new Error("API failed");
+          const downloadUrl = videoData?.result?.download_url;
+
+          if (!videoData?.status || !downloadUrl) {
+            throw new Error("No se pudo obtener el enlace del video.");
+          }
 
           await Atlas.sendMessage(
-            m.from,
+            chatId,
             {
-              video: { url: videoData.result.download_url },
+              video: { url: downloadUrl },
               mimetype: "video/mp4",
               caption: `🎬 *Video Downloaded*\n\n> Powered by ${botName}`,
             },
             { quoted: m },
           );
 
-          await doReact("✅");
+          if (doReact) await doReact("✅");
           break;
+        }
 
         case "mp3":
-        case "ytmp3":
-          await doReact("🎶");
+        case "ytmp3": {
+          if (doReact) await doReact("🎶");
 
           const audioUrl = extractUrl(query);
-          if (!audioUrl)
+
+          if (!audioUrl) {
             return m.reply(
               "❌ Invalid YouTube link. Please provide a valid YouTube URL for mp3.",
             );
+          }
 
-          const audioRes = await axios.get(
+          const audioData = await apiGet(
             `https://api-faa.my.id/faa/ytmp3?url=${encodeURIComponent(audioUrl)}`,
           );
-          const audioData = audioRes.data;
 
-          if (!audioData.status) throw new Error("API failed");
+          const result = audioData?.result;
 
-          const {
-            title: audioTitle,
-            thumbnail: audioThumbnail,
-            mp3: audioMp3,
-          } = audioData.result;
+          if (!audioData?.status || !result?.mp3) {
+            throw new Error("No se pudo obtener el audio.");
+          }
 
           await Atlas.sendMessage(
-            m.from,
+            chatId,
             {
-              audio: { url: audioMp3 },
+              audio: { url: result.mp3 },
               mimetype: "audio/mpeg",
               contextInfo: {
                 externalAdReply: {
-                  title: audioTitle,
+                  title: result.title || "YouTube Audio",
                   body: "🎧 YouTube Audio",
-                  thumbnailUrl: audioThumbnail,
+                  ...(result.thumbnail
+                    ? { thumbnailUrl: result.thumbnail }
+                    : {}),
                   mediaType: 2,
                   renderLargerThumbnail: true,
                 },
@@ -137,71 +175,96 @@ export default {
             },
             { quoted: m },
           );
+
           break;
+        }
 
         case "play":
         case "song":
-        case "yt":
-          await doReact("📥");
+        case "yt": {
+          if (doReact) await doReact("📥");
 
-          const playRes = await axios.get(
+          const playData = await apiGet(
             `https://api-faa.my.id/faa/ytplay?query=${encodeURIComponent(query)}`,
           );
-          const playData = playRes.data;
 
-          if (!playData.status) throw new Error("API failed");
+          const result = playData?.result;
+
+          if (!playData?.status || !result?.mp3) {
+            throw new Error("No se pudo encontrar o generar el audio.");
+          }
 
           const {
             title: playTitle,
             author: playAuthor,
             thumbnail: playThumbnail,
             mp3: playMp3,
-          } = playData.result;
+          } = result;
 
-          // Enviar y guardar la referencia del mensaje de información
-          const previewMessage = await Atlas.sendMessage(
-            m.from,
-            {
-              image: { url: playThumbnail },
-              caption: `🎶 *${playTitle}*
-👤 ${playAuthor}
+          let previewMessage;
 
-⬇️ Downloading...`,
-            },
-            { quoted: m },
-          );
+          try {
+            if (playThumbnail) {
+              previewMessage = await Atlas.sendMessage(
+                chatId,
+                {
+                  image: { url: playThumbnail },
+                  caption:
+                    `🎶 *${playTitle || "YouTube"}*\n` +
+                    `👤 ${playAuthor || "Desconocido"}\n\n` +
+                    `⬇️ Downloading...`,
+                },
+                { quoted: m },
+              );
+            }
 
-          // Enviar el audio
-          await Atlas.sendMessage(
-            m.from,
-            {
-              audio: { url: playMp3 },
-              mimetype: "audio/mpeg",
-              contextInfo: {
-                externalAdReply: {
-                  title: playTitle,
-                  body: playAuthor,
-                  thumbnailUrl: playThumbnail,
-                  mediaType: 2,
-                  renderLargerThumbnail: true,
+            await Atlas.sendMessage(
+              chatId,
+              {
+                audio: { url: playMp3 },
+                mimetype: "audio/mpeg",
+                contextInfo: {
+                  externalAdReply: {
+                    title: playTitle || "YouTube Audio",
+                    body: playAuthor || "YouTube",
+                    ...(playThumbnail
+                      ? { thumbnailUrl: playThumbnail }
+                      : {}),
+                    mediaType: 2,
+                    renderLargerThumbnail: true,
+                  },
                 },
               },
-            },
-            { quoted: m },
-          );
-
-          // Eliminar el mensaje de información después de enviar el audio
-          if (previewMessage?.key) {
-            await Atlas.sendMessage(m.from, {
-              delete: previewMessage.key,
-            });
+              { quoted: m },
+            );
+          } finally {
+            if (previewMessage?.key) {
+              try {
+                await Atlas.sendMessage(chatId, {
+                  delete: previewMessage.key,
+                });
+              } catch {
+                // No interrumpir el envío si falla el borrado de la vista previa.
+              }
+            }
           }
 
           break;
+        }
+
+        default:
+          return m.reply("❌ Comando de YouTube no reconocido.");
       }
     } catch (err) {
-      console.error("[ EXCEPTION ] Error converting to opus:", err);
-      m.reply(`❌ Error: ${err.message}`);
+      console.error("[YouTube] Error:", err.message);
+
+      await m.reply(
+        err.code === "ECONNABORTED"
+          ? "⏱️ La API tardó demasiado en responder. Inténtalo otra vez."
+          : `❌ Error: ${err.message}`,
+      );
+    } finally {
+      activeChats.delete(chatId);
     }
   },
 };

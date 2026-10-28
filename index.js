@@ -117,13 +117,13 @@ global.lidToJidMap = new Map();
 const MESSAGE_CACHE_TTL_MS =
   Math.max(
     30,
-    parseInt(process.env.MESSAGE_CACHE_TTL_MINUTES || "360", 10) || 360,
+    parseInt(process.env.MESSAGE_CACHE_TTL_MINUTES || "30", 10) || 360,
   ) *
   60 *
   1000;
 const MESSAGE_CACHE_MAX_PER_CHAT = Math.max(
   50,
-  parseInt(process.env.MESSAGE_CACHE_MAX_PER_CHAT || "500", 10) || 500,
+  parseInt(process.env.MESSAGE_CACHE_MAX_PER_CHAT || "100", 10) || 500,
 );
 
 const store = {
