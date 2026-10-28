@@ -32,7 +32,7 @@ if (!gg) {
 global.owner = gg.split(",");
 global.mongodb = process.env.MONGODB || "mongodb://localhost:27017/atlas";
 global.sessionId = stripEnv(process.env.SESSION_ID, "ok");
-global.prefa = stripEnv(process.env.PREFIX, "-");
+global.prefa = stripEnv(process.env.PREFIX, "/");
 global.packname = stripEnv(process.env.PACKNAME, `Atlas Bot`);
 global.author = stripEnv(process.env.AUTHOR, "by: Team Atlas");
 global.port = stripEnv(process.env.PORT, "10000");
