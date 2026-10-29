@@ -78,7 +78,7 @@
 | ----------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------- |
 | **Repl.it** | <a href="https://repl.it/github/FantoX/Atlas-MD"><img src="https://i.ibb.co/zrB5kMh/deploy-on-repl.jpg" alt="Deploy on Repl.it" height="32"></a>                                                                                                                                                                                                                                             | [▶ Watch](https://youtu.be/R-_DU73UH8Q) |
 | **Railway** | <a href="https://railway.app/new/template/Gts2Zx?referralCode=f3gg2m"><img src="https://railway.app/button.svg" alt="Deploy on Railway" height="32"></a>                                                                                                                                                                                                                                     | [▶ Watch](https://youtu.be/Qs6ryWnEtu8) |
-| **Koyeb**   | <a href="https://app.koyeb.com/apps/deploy?type=docker&image=quay.io/FantoX/Atlas-MD:main&env[PORT]=8000&env[PREFIX]=-&&env[MONGODB]=mongodb+srv://...&&env[SESSION_ID]=yourSession&&env[MODS]=918101187835&&env[TENOR_API_KEY]=AIzaSyCyouca1_KKy4W_MG1xsPzuku5oa8W358c&&name=atlas"><img src="https://www.koyeb.com/static/images/deploy/button.svg" alt="Deploy on Koyeb" height="32"></a> | [▶ Watch](https://youtu.be/OvNnpK1Gx6Y) |
+| **Koyeb**   | <a href="https://app.koyeb.com/apps/deploy?type=docker&image=quay.io/FantoX/Atlas-MD:main&env[PORT]=8000&env[PREFIX]=%2F&&env[MONGODB]=mongodb+srv://...&&env[SESSION_ID]=yourSession&&env[MODS]=918101187835&&env[TENOR_API_KEY]=AIzaSyCyouca1_KKy4W_MG1xsPzuku5oa8W358c&&name=atlas"><img src="https://www.koyeb.com/static/images/deploy/button.svg" alt="Deploy on Koyeb" height="32"></a> | [▶ Watch](https://youtu.be/OvNnpK1Gx6Y) |
 | **Heroku**  | <a href="https://heroku.com/deploy?template=https://github.com/FantoX/Atlas-MD"><img src="https://www.herokucdn.com/deploy/button.png" alt="Deploy on Heroku" height="32"></a>                                                                                                                                                                                                               | —                                       |
 
 </p>
@@ -92,10 +92,12 @@
 
 | Variable              | Description                                                                                   | Required    |
 | --------------------- | --------------------------------------------------------------------------------------------- | ----------- |
-| `PREFIX`              | Command prefix (e.g. `-`, `.`, `!`)                                                           | ✅          |
+| `PREFIX`              | Command prefix (defaults to `/`; an environment value overrides the default)                  | Optional    |
 | `MODS`                | Owner phone numbers without `+` or spaces, comma-separated (e.g. `9181011xxxxx,9198XXXXXXXX`) | ✅          |
 | `MONGODB`             | Your MongoDB connection URL                                                                   | ✅          |
-| `SESSION_ID`          | Any random string — acts as the bot session key                                               | ✅          |
+| `SESSION_ID`          | Stable unique key for this bot's WhatsApp session; keep it unchanged to restore the session    | ✅          |
+| `SESSION_DIR`         | Optional writable directory for Baileys working auth files; MongoDB remains the durable store | Optional    |
+| `PAIRING_API_TOKEN`   | Random secret of at least 32 characters required by `/api/qr` and `/api/pair`                 | ✅ for dashboard linking |
 | `TENOR_API_KEY`       | Tenor API key(s) for GIF commands, comma-separated                                            | ✅ for GIFs |
 | `GEMINI_API`          | Google Gemini API key(s), comma-separated                                                     | Optional    |
 | `OPENAI_API`          | OpenAI API key(s) starting with `sk-`, comma-separated                                        | Optional    |
@@ -133,9 +135,9 @@ npm install -g pm2
 pm2 start ecosystem.config.cjs
 ```
 
-Scan the QR that appears in your browser via **WhatsApp → Linked Devices → Link a device**.
+Open the dashboard and enter `PAIRING_API_TOKEN` to view the QR or request a pairing code. Scan it via **WhatsApp → Linked Devices → Link a device**. The token is not included in the page and should be entered only over HTTPS.
 
-> **Lost your session?** Change `SESSION_ID` to any new random value in `.env` and restart.
+> Change `SESSION_ID` only when you intentionally want a separate WhatsApp session. A timeout or temporary disconnect is not a reason to change it.
 
 ---
 
@@ -168,17 +170,17 @@ pm2 start ecosystem.config.cjs
 - 🛠️ **Group Moderation & Management**: Take full control of your groups. Features include silent bans (users are ignored by the bot), anti-link protection, customizable welcome/goodbye messages, tagging all members, and managing admin roles fluidly.
 - 📥 **Universal Downloader**: Simply send a link from TikTok, Instagram, YouTube, X (Twitter), Pinterest, Spotify, Facebook, or SoundCloud, and the bot will instantly recognize and download the media or audio for you.
 - 🖼️ **Media & Sticker Toolkit**: Create static, animated, or meme stickers directly from images and videos. Convert media between formats (MP4 to MP3, Image to PDF, Sticker to Video) with ease. Includes built-in Google Emoji Kitchen mixing!
-- 🧩 **Live Plugin Architecture**: Expand the bot's functionality without ever shutting it down. Use `-install` to add new commands directly from GitHub gists or URLs on the fly.
+- 🧩 **Live Plugin Architecture**: Expand the bot's functionality without ever shutting it down. Use `/install` to add new commands directly from GitHub gists or URLs on the fly (or replace `/` with your configured `PREFIX`).
 - 🔍 **Search & Utilities**: Built-in Google searches, YouTube scraping, lyrics fetcher, HD wallpapers, Pinterest images, GitHub profiling, and real-time weather information.
 - 🎭 **Anime Reactions & Characters**: Pick from 20 different anime bot personalities (like Power, Makima, Zero Two) and express yourself with dozens of high-quality animated reaction GIFs (bite, hug, slap, etc.).
 
-> **Tip:** You can view the full list of available commands anytime by typing `-help` in your chat!
+> **Tip:** You can view the full list of available commands anytime by typing `/help` in your chat, unless you configured another `PREFIX`.
 
 ---
 
 ## 🎭 Bot Characters
 
-Switch the bot's personality and profile picture with `-setchar <ID>`. Use `-charlist` to see all.
+Switch the bot's personality and profile picture with `/setchar <ID>`. Use `/charlist` to see all, unless you configured another `PREFIX`.
 
 | ID  | Character     | Series                 | ID  | Character    | Series            |
 | --- | ------------- | ---------------------- | --- | ------------ | ----------------- |
@@ -197,7 +199,7 @@ Switch the bot's personality and profile picture with `-setchar <ID>`. Use `-cha
 
 ## 🔖 Plugin Store
 
-Install any plugin with: `-install <url>`
+Install any plugin with: `/install <url>`
 
 | Plugin             | Commands                             | Install URL                                                                                                                                 |
 | ------------------ | ------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------- |
@@ -237,7 +239,7 @@ Install any plugin with: `-install <url>`
 - **Triple AI** (ChatGPT + Claude + Gemini) built-in with multi-key pools for rate-limit resilience.
 - **Universal 13-Platform Downloader** — one command, any link.
 - **Silent Banning** — banned users and groups receive zero response; bot acts as if it doesn't exist.
-- **No local session storage** — session is stored in MongoDB for privacy and security.
+- **MongoDB-backed session storage** — Baileys uses a local working copy (configurable with `SESSION_DIR`, or OS temp storage if the app directory is read-only) and syncs it to MongoDB.
 - **Platform-agnostic** — works on Railway, Heroku, Koyeb, Render, Docker, pm2, and local.
 - **FFmpeg bundled** — reactions and sticker conversions work out of the box, everywhere.
 

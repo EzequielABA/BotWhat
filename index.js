@@ -23,7 +23,10 @@ import { smsg, getBuffer, getSizeMedia } from "./System/Function2.js";
 import { fileURLToPath } from "url";
 import { dirname } from "path";
 
-import readline from "readline";
+import {
+  hasValidPairingToken,
+  isPairingTokenConfigured,
+} from "./System/PairingAuth.js";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -114,7 +117,6 @@ import core from "./Core.js";
 commands.prefix = global.prefa;
 import mongoose from "mongoose";
 import qrcode from "qrcode";
-import qrcodeTerminal from "qrcode-terminal";
 import {
   getPluginURLs,
   checkAntidelete,
@@ -122,7 +124,7 @@ import {
 } from "./System/MongoDB/MongoDb_Core.js";
 import chalk from "chalk";
 
-app.use(express.json());
+app.use(express.json({ limit: "10kb" }));
 
 global.lidToJidMap = new Map();
 
@@ -454,18 +456,17 @@ const connectAtlas = async (trigger) => {
   }
   // ────────────────────────────────────────────────────────────────────────
 
-  try {
-    await mongoose.connect(mongodb);
-    console.log(chalk.green(`[ ATLAS ] MongoDB connected ✓`));
-  } catch (err) {
-    console.error(
-      chalk.redBright(`[ EXCEPTION ] MongoDB error: ${err.message}`),
-    );
-  }
-  const nextMongoAuth = new MongoAuth(sessionId);
-  const { state, saveCreds, clearState } = await nextMongoAuth.init();
+  await mongoose.connect(mongodb);
+  console.log(chalk.green(`[ ATLAS ] MongoDB connected ✓`));
+  const nextMongoAuth = mongoAuth || new MongoAuth(sessionId);
+  nextMongoAuth.onLeaseLost = () => {
+    void shutdown("SESSION_LEASE_LOST", 1);
+  };
   mongoAuth = nextMongoAuth;
+  sessionSyncPaused = true;
+  const { state, saveCreds, clearState } = await nextMongoAuth.init();
   clearAuthState = clearState;
+  sessionSyncPaused = false;
   console.log(
     figlet.textSync("ATLAS", {
       font: "Standard",
@@ -597,7 +598,12 @@ const connectAtlas = async (trigger) => {
 
   await readcommands();
 
-  Atlas.ev.on("creds.update", saveCreds);
+  Atlas.ev.on("creds.update", () => {
+    if (!isCurrentSocket(Atlas, generation)) return;
+    void saveCreds().catch((err) =>
+      console.error(`[ EXCEPTION ] WhatsApp auth persistence failed: ${err.message}`),
+    );
+  });
   Atlas.serializeM = (m) => smsg(Atlas, m, store);
   Atlas.ev.on("connection.update", async (update) => {
     if (!isCurrentSocket(Atlas, generation)) return;
@@ -643,7 +649,7 @@ const connectAtlas = async (trigger) => {
     if (qr) {
       QR_GENERATE = qr;
       status = "qr";
-      qrcodeTerminal.generate(qr, { small: true });
+      console.info("[ ATLAS ] QR available through the protected dashboard endpoint.");
     }
   });
 
@@ -1102,60 +1108,6 @@ const connectAtlas = async (trigger) => {
 void startAtlas();
 
 
-async function generatePairingCode() {
-  const phone = String(global.owner?.[0] || "").replace(/[^0-9]/g, "");
-
-  if (!phone) {
-    console.log("[ ATLAS ] No hay un número configurado en global.owner[0].");
-    return;
-  }
-
-  if (status === "open") {
-    console.log("[ ATLAS ] WhatsApp ya está conectado; no hace falta otro código.");
-    return;
-  }
-
-  const socket = AtlasSocket;
-
-  if (!socket || !socket.ws?.isOpen) {
-    console.log("[ ATLAS ] El socket todavía no está listo para generar el código.");
-    return;
-  }
-
-  try {
-    console.log("[ ATLAS ] Generando código de vinculación...");
-    const code = await socket.requestPairingCode(phone);
-    console.log(
-      chalk.black.bgGreen(" CÓDIGO DE VINCULACIÓN "),
-      chalk.black.bgWhite(` ${code} `),
-    );
-    console.log("[ ATLAS ] Vincula el dispositivo desde WhatsApp > Dispositivos vinculados.");
-  } catch (error) {
-    console.error("[ ATLAS ] No se pudo generar el código:", error.message);
-  }
-}
-
-const pairingConsole = readline.createInterface({
-  input: process.stdin,
-  output: process.stdout,
-});
-
-console.log("[ ATLAS ] Esperando a que el socket esté listo para generar el código automáticamente.");
-
-const pairingCheck = setInterval(() => {
-  if (status === "open") {
-    clearInterval(pairingCheck);
-    console.log("[ ATLAS ] Sesión ya conectada; no se necesita código.");
-    return;
-  }
-
-  if (AtlasSocket?.ws?.isOpen && status === "connecting") {
-    clearInterval(pairingCheck);
-    void generatePairingCode();
-  }
-}, 1000);
-
-
 // Dynamic garbage collection — interval configurable via GC_INTERVAL_MINUTES env (default: 30)
 const GC_INTERVAL_MINUTES = Math.max(
   1,
@@ -1163,7 +1115,7 @@ const GC_INTERVAL_MINUTES = Math.max(
 );
 // Periodic MongoDB session sync — runs at the same interval as GC
 const runPeriodicSync = async () => {
-  if (sessionSyncPaused || !mongoAuth || periodicSyncPromise) {
+  if (sessionSyncPaused || !mongoAuth || !mongoAuth.leaseHeld || mongoAuth.leaseLost || periodicSyncPromise) {
     return periodicSyncPromise;
   }
 
@@ -1315,7 +1267,7 @@ if (typeof global.gc === "function") {
   );
 }
 
-const shutdown = async (signal) => {
+const shutdown = async (signal, exitCode = 0) => {
   if (shuttingDown) return;
   shuttingDown = true;
   status = "stopping";
@@ -1332,8 +1284,9 @@ const shutdown = async (signal) => {
     new Promise((resolve) => setTimeout(resolve, 10_000)),
   ]);
   await closeActiveSocket(`Process shutdown: ${signal}`);
+  await mongoAuth?.releaseLease().catch(() => {});
   await mongoose.disconnect().catch(() => {});
-  process.exit(0);
+  process.exit(exitCode);
 };
 
 process.once("SIGINT", () => void shutdown("SIGINT"));
@@ -1344,16 +1297,28 @@ app.use("/", express.static(join(__dirname, "Frontend")));
 // --- GUI API Endpoints ---
 
 app.get("/api/status", (req, res) => {
-  res.json({
-    status,
-    websocketOpen: Boolean(AtlasSocket?.ws?.isOpen),
-    reconnectAttempt,
-    healthProbeFailures,
-    lastConnectionUpdate: new Date(lastConnectionUpdateAt).toISOString(),
-  });
+  res.json({ status });
 });
 
+const pairingApiToken = String(process.env.PAIRING_API_TOKEN || "");
+let lastPairingRequestAt = 0;
+const PAIRING_RATE_LIMIT_MS = 30_000;
+const requirePairingToken = (req, res) => {
+  if (!isPairingTokenConfigured(pairingApiToken)) {
+    res.status(503).json({ error: "Pairing is disabled: configure PAIRING_API_TOKEN with at least 32 characters." });
+    return false;
+  }
+  const supplied = String(req.get("authorization") || "").replace(/^Bearer\s+/i, "");
+  if (!hasValidPairingToken(supplied, pairingApiToken)) {
+    res.status(401).json({ error: "Authorization required." });
+    return false;
+  }
+  return true;
+};
+
 app.get("/api/qr", async (req, res) => {
+  res.set("Cache-Control", "no-store, private");
+  if (!requirePairingToken(req, res)) return;
   if (status === "open") {
     return res.json({ status: "connected" });
   }
@@ -1369,34 +1334,32 @@ app.get("/api/qr", async (req, res) => {
 });
 
 app.post("/api/pair", async (req, res) => {
-  const { phone } = req.body;
-  if (!phone) {
-    return res.status(400).json({ error: "Phone number is required." });
+  res.set("Cache-Control", "no-store, private");
+  if (!requirePairingToken(req, res)) return;
+  const phone = String(req.body?.phone || "").replace(/[^0-9]/g, "");
+  if (!/^\d{8,15}$/.test(phone)) {
+    return res.status(400).json({ error: "Enter a phone number with country code (8–15 digits)." });
   }
   if (status === "open") {
     return res.status(400).json({ error: "Session is already connected!" });
   }
-  if (!AtlasSocket) {
+  if (!AtlasSocket?.ws?.isOpen || !["qr", "connecting"].includes(status)) {
     return res
       .status(503)
       .json({ error: "Bot socket is not ready yet. Please wait a moment." });
   }
+  const now = Date.now();
+  if (now - lastPairingRequestAt < PAIRING_RATE_LIMIT_MS) {
+    return res.status(429).json({ error: "Wait before requesting another pairing code." });
+  }
+  lastPairingRequestAt = now;
   try {
-    const cleaned = phone.replace(/[^0-9]/g, "");
-    let code = await AtlasSocket.requestPairingCode(cleaned);
+    let code = await AtlasSocket.requestPairingCode(phone);
     code = code?.match(/.{1,4}/g)?.join("-") || code;
-    console.log(
-      chalk.black.bgGreen(` PAIRING CODE: `),
-      chalk.black.bgWhite(` ${code} `),
-    );
     return res.json({ code });
   } catch (err) {
-    console.error(
-      chalk.red("[ EXCEPTION ] Pairing code error: " + err.message),
-    );
-    return res
-      .status(500)
-      .json({ error: "Failed to generate pairing code: " + err.message });
+    console.error(chalk.red("[ EXCEPTION ] Pairing code request failed."));
+    return res.status(500).json({ error: "Failed to generate pairing code." });
   }
 });
 

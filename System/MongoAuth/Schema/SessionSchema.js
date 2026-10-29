@@ -14,6 +14,14 @@ const schema = new Schema({
     type: Date,
     default: null,
   },
+  leaseOwner: {
+    type: String,
+    default: null,
+  },
+  leaseUntil: {
+    type: Date,
+    default: null,
+  },
 });
 
 export default model("sessionschemas", schema);

@@ -1,4 +1,6 @@
 import fs from "fs";
+import os from "os";
+import { randomUUID } from "node:crypto";
 import path from "path";
 import { fileURLToPath } from "url";
 import { useMultiFileAuthState, BufferJSON } from "@whiskeysockets/baileys";
@@ -7,11 +9,13 @@ import { sessionSchema } from "./Schema/index.js";
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
-// All local sessions live under System/session/<sessionId>/
-
-const SESSION_BASE_DIR = process.env.SESSION_DIR
+// Local files are Baileys' working copy; MongoDB is the durable session store.
+const CONFIGURED_SESSION_BASE_DIR = process.env.SESSION_DIR
   ? path.resolve(process.env.SESSION_DIR)
-  : path.join(__dirname, "..", "session");
+  : null;
+const DEFAULT_SESSION_BASE_DIR = path.join(__dirname, "..", "session");
+const LEASE_TTL_MS = 90_000;
+const LEASE_RENEW_INTERVAL_MS = 30_000;
 
 
 const LEGACY_KEY_TYPE_MAP = {
@@ -28,8 +32,40 @@ export default class MongoAuth {
    * @param {string} sessionId
    */
   constructor(sessionId) {
+    if (!/^[A-Za-z0-9._-]+$/.test(String(sessionId)) || [".", ".."].includes(sessionId)) {
+      throw new Error("SESSION_ID must contain only letters, numbers, dots, underscores, or hyphens.");
+    }
     this.sessionId = sessionId;
-    this.dir = path.join(SESSION_BASE_DIR, sessionId);
+    this.sessionBaseDir = CONFIGURED_SESSION_BASE_DIR || DEFAULT_SESSION_BASE_DIR;
+    this.dir = path.join(this.sessionBaseDir, sessionId);
+    this.persistQueue = Promise.resolve();
+    this.leaseOwner = randomUUID();
+    this.leaseHeld = false;
+    this.leaseLost = false;
+    this.leaseTimer = null;
+    this.onLeaseLost = null;
+  }
+
+  async _ensureWritableDirectory() {
+    try {
+      await fs.promises.mkdir(this.dir, { recursive: true });
+      await fs.promises.access(this.dir, fs.constants.W_OK);
+    } catch (err) {
+      if (CONFIGURED_SESSION_BASE_DIR || !["EROFS", "EACCES", "EPERM"].includes(err.code)) {
+        throw err;
+      }
+      this.sessionBaseDir = path.join(os.tmpdir(), "atlas-md-sessions");
+      this.dir = path.join(this.sessionBaseDir, this.sessionId);
+      await fs.promises.mkdir(this.dir, { recursive: true });
+      await fs.promises.access(this.dir, fs.constants.W_OK);
+      console.warn("[ ATLAS ] App directory is read-only; using OS temporary storage for the MongoDB-backed session.");
+    }
+  }
+
+  _serializePersistence(operation) {
+    const result = this.persistQueue.then(operation, operation);
+    this.persistQueue = result.catch(() => {});
+    return result;
   }
 
   /**
@@ -38,6 +74,8 @@ export default class MongoAuth {
    */
   async init() {
     console.log(`[ ATLAS ] Starting session: "${this.sessionId}"`);
+    await this._ensureWritableDirectory();
+    await this._acquireLease();
 
     const localExists = await this._localExists();
 
@@ -55,6 +93,7 @@ export default class MongoAuth {
             `[ EXCEPTION ] [${this.sessionId}] Session download failed: ${err.message} — wiping partial files.`,
           );
           await fs.promises.rm(this.dir, { recursive: true, force: true });
+          throw new Error("MongoDB session restore failed; keeping the stored session untouched.");
         }
 
         const downloadOk = await this._localExists();
@@ -63,10 +102,8 @@ export default class MongoAuth {
             `[ ATLAS ] [${this.sessionId}] Session restored from MongoDB ✓`,
           );
         } else {
-          console.log(
-            `[ ATLAS ] [${this.sessionId}] Session download incomplete — starting fresh (QR scan required).`,
-          );
           await fs.promises.rm(this.dir, { recursive: true, force: true });
+          throw new Error("MongoDB contains an incomplete WhatsApp session; refusing to replace it with a new QR session.");
         }
       } else {
         // Neither local nor MongoDB — empty dir triggers QR scan
@@ -78,22 +115,21 @@ export default class MongoAuth {
       console.log(`[ ATLAS ] [${this.sessionId}] Local session found ✓`);
     }
 
-    await fs.promises.mkdir(this.dir, { recursive: true });
-
     const { state, saveCreds: saveCredsLocal } = await useMultiFileAuthState(
       this.dir,
     );
 
-    const saveCreds = async () => {
+    const saveCreds = async () => this._serializePersistence(async () => {
       await saveCredsLocal();
-      await this.pushToMongoDB().catch((err) =>
+      await this._pushToMongoDB().catch((err) =>
         console.error(
           `[ EXCEPTION ] MongoDB session sync error: ${err.message}`,
         ),
       );
-    };
+    });
 
     const clearState = async () => {
+      await this.persistQueue;
       await this._clearSession();
     };
 
@@ -105,14 +141,95 @@ export default class MongoAuth {
    * Called by the periodic background sync (GC interval).
    */
   async pushToMongoDB() {
+    return this._serializePersistence(() => this._pushToMongoDB());
+  }
+
+  async _acquireLease() {
+    if (this.leaseTimer) clearInterval(this.leaseTimer);
+    await sessionSchema.init();
+    const now = new Date();
+    try {
+      const lease = await sessionSchema.findOneAndUpdate(
+        {
+          sessionId: this.sessionId,
+          $or: [
+            { leaseOwner: this.leaseOwner },
+            { leaseUntil: { $lte: now } },
+            { leaseUntil: { $exists: false } },
+            { leaseUntil: null },
+          ],
+        },
+        {
+          $setOnInsert: { sessionId: this.sessionId },
+          $set: {
+            leaseOwner: this.leaseOwner,
+            leaseUntil: new Date(now.getTime() + LEASE_TTL_MS),
+          },
+        },
+        { upsert: true, new: true },
+      );
+      if (!lease || lease.leaseOwner !== this.leaseOwner) {
+        throw new Error("WhatsApp session is already active in another process.");
+      }
+      this.leaseHeld = true;
+      this.leaseLost = false;
+      this.leaseTimer = setInterval(() => {
+        void this._renewLease();
+      }, LEASE_RENEW_INTERVAL_MS);
+      this.leaseTimer.unref?.();
+    } catch (err) {
+      this.leaseHeld = false;
+      if (err.code === 11000) {
+        throw new Error("WhatsApp session is already active in another process.");
+      }
+      throw err;
+    }
+  }
+
+  async _renewLease() {
+    try {
+      const result = await sessionSchema.updateOne(
+        { sessionId: this.sessionId, leaseOwner: this.leaseOwner },
+        { $set: { leaseUntil: new Date(Date.now() + LEASE_TTL_MS) } },
+      );
+      if (result.matchedCount === 0) {
+        throw new Error("Session lease is no longer owned by this process.");
+      }
+    } catch (err) {
+      if (this.leaseLost) return;
+      this.leaseHeld = false;
+      this.leaseLost = true;
+      console.error(`[ EXCEPTION ] WhatsApp session ownership lost: ${err.message}`);
+      this.onLeaseLost?.();
+    }
+  }
+
+  async releaseLease() {
+    if (this.leaseTimer) clearInterval(this.leaseTimer);
+    this.leaseTimer = null;
+    try {
+      await sessionSchema.updateOne(
+        { sessionId: this.sessionId, leaseOwner: this.leaseOwner },
+        { $unset: { leaseOwner: "", leaseUntil: "" } },
+      );
+    } finally {
+      this.leaseHeld = false;
+    }
+  }
+
+  async _pushToMongoDB() {
+    if (!this.leaseHeld || this.leaseLost) {
+      throw new Error("Session lease is no longer valid.");
+    }
     const localExists = await this._localExists();
     if (!localExists) return;
 
     let entries;
     try {
       entries = await fs.promises.readdir(this.dir);
-    } catch {
-      return;
+    } catch (err) {
+      if (err.code === "ENOENT") return;
+      throw err;
     }
 
     const files = {};
@@ -124,46 +241,47 @@ export default class MongoAuth {
           const content = await fs.promises.readFile(filePath);
           files[entry] = content.toString("base64");
         }
-      } catch {
-        // skip unreadable files
+      } catch (err) {
+        throw new Error(`Could not read auth file ${entry}: ${err.message}`);
       }
     }
 
     if (Object.keys(files).length === 0) return;
 
-    await sessionSchema.updateOne(
-      { sessionId: this.sessionId },
+    const result = await sessionSchema.updateOne(
+      { sessionId: this.sessionId, leaseOwner: this.leaseOwner },
       { $set: { files, lastSync: new Date() } },
-      { upsert: true },
     );
+    if (result.matchedCount === 0) {
+      this.leaseHeld = false;
+      this.leaseLost = true;
+      this.onLeaseLost?.();
+      throw new Error("Session lease was lost before auth data could be saved.");
+    }
   }
 
   async _localExists() {
     const credsPath = path.join(this.dir, "creds.json");
     try {
-      await fs.promises.access(credsPath);
-      return true;
-    } catch {
-      return false;
+      const stat = await fs.promises.stat(credsPath);
+      return stat.isFile() && stat.size > 0;
+    } catch (err) {
+      if (err.code === "ENOENT") return false;
+      throw err;
     }
   }
 
   async _mongoExists() {
-    try {
-      const doc = await sessionSchema.findOne({ sessionId: this.sessionId });
-      if (!doc) return false;
-      if (
-        doc.files &&
-        Object.keys(doc.files).some(
-          (k) => doc.files[k] && doc.files[k].length > 0,
-        )
+    const doc = await sessionSchema.findOne({ sessionId: this.sessionId });
+    if (!doc) return false;
+    if (
+      doc.files &&
+      Object.keys(doc.files).some(
+        (k) => doc.files[k] && doc.files[k].length > 0,
       )
-        return true;
-      if (doc.session && doc.session.length > 0) return true;
-      return false;
-    } catch {
-      return false;
-    }
+    )
+      return true;
+    return Boolean(doc.session && doc.session.length > 0);
   }
 
   async _downloadToLocal() {
@@ -178,6 +296,9 @@ export default class MongoAuth {
     if (!doc.files) return;
     await fs.promises.mkdir(this.dir, { recursive: true });
     for (const [filename, base64Content] of Object.entries(doc.files)) {
+      if (path.basename(filename) !== filename || filename === "." || filename === "..") {
+        throw new Error("MongoDB session contains an invalid auth filename.");
+      }
       if (!base64Content || base64Content.length === 0) {
         console.log(
           `[ ATLAS ] [${this.sessionId}] Skipping empty entry in MongoDB session: ${filename}`,
@@ -239,12 +360,10 @@ export default class MongoAuth {
 
   async _clearSession() {
     await fs.promises.rm(this.dir, { recursive: true, force: true });
-
-    try {
-      await sessionSchema.deleteOne({ sessionId: this.sessionId });
-    } catch {
-      // local is already cleared
-    }
+    await sessionSchema.updateOne(
+      { sessionId: this.sessionId, leaseOwner: this.leaseOwner },
+      { $set: { files: {}, lastSync: new Date() }, $unset: { session: "" } },
+    );
 
     console.log(`[ ATLAS ] Session cleared from local storage and MongoDB.`);
   }

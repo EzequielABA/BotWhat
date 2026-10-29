@@ -42,6 +42,12 @@
             <span id="statusText">Checking status...</span>
           </div>
 
+          <div class="login__field">
+            <label for="pairingToken">Dashboard pairing token</label>
+            <input type="password" class="login__input" id="pairingToken" autocomplete="off" placeholder="Enter PAIRING_API_TOKEN" />
+            <p class="pair-hint">Required to view the QR code or request a linking code. Re-enter after refreshing this page.</p>
+          </div>
+
           <!-- Tab Switcher -->
           <div class="tab-switcher">
             <button class="tab-btn active" id="tabQr" onclick="switchTab('qr')">
@@ -128,6 +134,9 @@
       let currentTab = "qr";
       let qrPollInterval = null;
       let statusPollInterval = null;
+      const tokenInput = document.getElementById("pairingToken");
+      tokenInput.addEventListener("input", () => pollQr());
+      const pairingHeaders = () => ({ Authorization: `Bearer ${tokenInput.value}` });
 
       function switchTab(tab) {
         currentTab = tab;
@@ -170,7 +179,7 @@
 
       async function pollQr() {
         try {
-          const res = await fetch("/api/qr");
+          const res = await fetch("/api/qr", { headers: pairingHeaders() });
           const data = await res.json();
           const img = document.getElementById("qrImage");
           const loading = document.getElementById("qrLoading");
@@ -189,7 +198,10 @@
           } else {
             img.style.display = "none";
             loading.style.display = "flex";
-            hint.style.display = "none";
+            hint.textContent = res.status === 401 || res.status === 503
+              ? "Enter the dashboard pairing token above to view the QR code."
+              : "Scan this QR code with WhatsApp";
+            hint.style.display = "block";
           }
         } catch (e) {
           // ignore
@@ -217,7 +229,7 @@
         try {
           const res = await fetch("/api/pair", {
             method: "POST",
-            headers: { "Content-Type": "application/json" },
+            headers: { "Content-Type": "application/json", ...pairingHeaders() },
             body: JSON.stringify({ phone }),
           });
           const data = await res.json();

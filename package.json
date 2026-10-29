@@ -5,7 +5,7 @@
   "type": "module",
   "main": "index.js",
   "scripts": {
-    "test": "node --check index.js && node --check Configurations.js && node --check Core.js",
+    "test": "node --test spec/pairing-auth.test.js && node --check index.js && node --check Configurations.js && node --check Core.js && node --check System/MongoAuth/MongoAuth.js && node --check System/MongoAuth/Schema/SessionSchema.js && node --check System/PairingAuth.js",
     "start": "node --max-old-space-size=256 --expose-gc index.js"
   },
   "repository": {

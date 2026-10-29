@@ -1,5 +1,5 @@
 import dotenv from "dotenv";
-dotenv.config({ override: true });
+dotenv.config();
 
 // Strip inline # comments that some env injectors (e.g. vestauth) leave in the value,
 // then trim surrounding whitespace.

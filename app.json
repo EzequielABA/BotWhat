@@ -20,11 +20,15 @@
   "success_url": "/",
   "env": {
     "PREFIX": {
-      "description": "Prefix of your bot Ex: . , / , # , & etc. Put anythong except @ (Default is -)",
+      "description": "Command prefix (default is /). Set PREFIX to override it.",
       "required": false
     },
     "SESSION_ID": {
-      "description": "A random string for your bot session. Which works as an OTP to get qr code. You have to change session every time to get a new qr."
+      "description": "A stable, unique id for this bot's WhatsApp session. Keep it unchanged to restore that session."
+    },
+    "SESSION_DIR": {
+      "description": "Optional writable directory for the local Baileys auth working copy; MongoDB stores the durable session.",
+      "required": false
     },
     "MODS": {
       "description": "Put any phone number without + , () and spaces \",\" Ex: 9181xxxxxxxx,9298xxxxxxxx )",
@@ -40,6 +44,10 @@
     },
     "MONGODB": {
       "description": "Put Your MongoDB URL. You can create MongoDB Atlas URL for free."
+    },
+    "PAIRING_API_TOKEN": {
+      "description": "Random secret of at least 32 characters for protected dashboard QR and pairing endpoints.",
+      "required": false
     },
     "OPENAI_API": {
       "description": "Put your OpenAI API key here if you want to use ChatGPT and DALL-E.",
