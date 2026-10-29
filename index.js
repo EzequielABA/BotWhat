@@ -23,11 +23,6 @@ import { smsg, getBuffer, getSizeMedia } from "./System/Function2.js";
 import { fileURLToPath } from "url";
 import { dirname } from "path";
 
-import {
-  hasValidPairingToken,
-  isPairingTokenConfigured,
-} from "./System/PairingAuth.js";
-
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
 
@@ -649,7 +644,7 @@ const connectAtlas = async (trigger) => {
     if (qr) {
       QR_GENERATE = qr;
       status = "qr";
-      console.info("[ ATLAS ] QR available through the protected dashboard endpoint.");
+      console.info("[ ATLAS ] QR available through the dashboard endpoint.");
     }
   });
 
@@ -1302,25 +1297,11 @@ app.get("/api/status", (req, res) => {
   res.json({ status });
 });
 
-const pairingApiToken = String(process.env.PAIRING_API_TOKEN || "");
 let lastPairingRequestAt = 0;
 const PAIRING_RATE_LIMIT_MS = 30_000;
-const requirePairingToken = (req, res) => {
-  if (!isPairingTokenConfigured(pairingApiToken)) {
-    res.status(503).json({ error: "Pairing is disabled: configure PAIRING_API_TOKEN with at least 32 characters." });
-    return false;
-  }
-  const supplied = String(req.get("authorization") || "").replace(/^Bearer\s+/i, "");
-  if (!hasValidPairingToken(supplied, pairingApiToken)) {
-    res.status(401).json({ error: "Authorization required." });
-    return false;
-  }
-  return true;
-};
 
 app.get("/api/qr", async (req, res) => {
   res.set("Cache-Control", "no-store, private");
-  if (!requirePairingToken(req, res)) return;
   if (status === "open") {
     return res.json({ status: "connected" });
   }
@@ -1337,7 +1318,6 @@ app.get("/api/qr", async (req, res) => {
 
 app.post("/api/pair", async (req, res) => {
   res.set("Cache-Control", "no-store, private");
-  if (!requirePairingToken(req, res)) return;
   const phone = String(req.body?.phone || "").replace(/[^0-9]/g, "");
   if (!/^\d{8,15}$/.test(phone)) {
     return res.status(400).json({ error: "Enter a phone number with country code (8–15 digits)." });

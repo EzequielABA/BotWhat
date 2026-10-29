@@ -97,7 +97,6 @@
 | `MONGODB`             | Your MongoDB connection URL                                                                   | ✅          |
 | `SESSION_ID`          | Stable unique key for this bot's WhatsApp session; keep it unchanged to restore the session    | ✅          |
 | `SESSION_DIR`         | Optional writable directory for Baileys working auth files; MongoDB remains the durable store | Optional    |
-| `PAIRING_API_TOKEN`   | Random secret of at least 32 characters required by `/api/qr` and `/api/pair`                 | ✅ for dashboard linking |
 | `TENOR_API_KEY`       | Tenor API key(s) for GIF commands, comma-separated                                            | ✅ for GIFs |
 | `GEMINI_API`          | Google Gemini API key(s), comma-separated                                                     | Optional    |
 | `OPENAI_API`          | OpenAI API key(s) starting with `sk-`, comma-separated                                        | Optional    |
@@ -135,7 +134,7 @@ npm install -g pm2
 pm2 start ecosystem.config.cjs
 ```
 
-Open the dashboard and enter `PAIRING_API_TOKEN` to view the QR or request a pairing code. Scan it via **WhatsApp → Linked Devices → Link a device**. The token is not included in the page and should be entered only over HTTPS.
+Open the dashboard to view the QR or request a pairing code. Scan it via **WhatsApp → Linked Devices → Link a device**. Keep the dashboard private while linking a WhatsApp account.
 
 > Change `SESSION_ID` only when you intentionally want a separate WhatsApp session. A timeout or temporary disconnect is not a reason to change it.
 
