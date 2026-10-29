@@ -597,7 +597,7 @@ const db = new QuickDB({ driver: jsonDriver });
 
     Atlas.setStatus(upTxt);
 
-    cmd.start(Atlas, m, {
+    await cmd.start(Atlas, m, {
       name: "Atlas",
       metadata,
       pushName: pushname,

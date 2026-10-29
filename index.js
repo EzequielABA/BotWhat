@@ -661,15 +661,17 @@ const connectAtlas = async (trigger) => {
   Atlas.ev.on("messages.upsert", async (chatUpdate) => {
     if (!isCurrentSocket(Atlas, generation)) return;
     if (chatUpdate.type !== "notify") return;
-    const msg = chatUpdate.messages?.[0];
-    if (!msg) return;
-    const m = serialize(Atlas, msg);
+    for (const msg of chatUpdate.messages ?? []) {
+      if (!isCurrentSocket(Atlas, generation)) return;
+      if (!msg?.message || msg.message.protocolMessage) continue;
+      const m = serialize(Atlas, msg);
 
-    if (!m?.message) return;
-    if (m.key?.remoteJid === "status@broadcast") return;
-    if (m.key?.id?.startsWith("BAE5") && m.key.id.length === 16) return;
+      if (!m?.message) continue;
+      if (m.key?.remoteJid === "status@broadcast") continue;
+      if (m.key?.id?.startsWith("BAE5") && m.key.id.length === 16) continue;
 
-    core(Atlas, m, commands, chatUpdate);
+      await core(Atlas, m, commands, chatUpdate);
+    }
   });
 
   // ─── Anti-Delete: catch "delete for everyone" and resend ───────────────────

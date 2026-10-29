@@ -232,17 +232,37 @@ export default class MongoAuth {
       throw err;
     }
 
-    const files = {};
-    for (const entry of entries) {
-      const filePath = path.join(this.dir, entry);
-      try {
-        const stat = await fs.promises.stat(filePath);
-        if (stat.isFile()) {
-          const content = await fs.promises.readFile(filePath);
-          files[entry] = content.toString("base64");
+    let files;
+    // Baileys can remove/replace pre-key files while credentials are being
+    // persisted. Retry the snapshot so Mongo never receives a partial session.
+    for (let attempt = 0; attempt < 3; attempt += 1) {
+      files = {};
+      let retrySnapshot = false;
+      for (const entry of entries) {
+        const filePath = path.join(this.dir, entry);
+        try {
+          const stat = await fs.promises.stat(filePath);
+          if (stat.isFile()) {
+            const content = await fs.promises.readFile(filePath);
+            files[entry] = content.toString("base64");
+          }
+        } catch (err) {
+          if (err.code === "ENOENT") {
+            retrySnapshot = true;
+            break;
+          }
+          throw new Error(`Could not read auth file ${entry}: ${err.message}`);
         }
+      }
+      if (!retrySnapshot) break;
+      if (attempt === 2) {
+        throw new Error("Auth files changed during MongoDB snapshot; retrying on the next sync.");
+      }
+      try {
+        entries = await fs.promises.readdir(this.dir);
       } catch (err) {
-        throw new Error(`Could not read auth file ${entry}: ${err.message}`);
+        if (err.code === "ENOENT") return;
+        throw err;
       }
     }
 
